@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import prayerTimesData from './assets/prayer-times.json';
   import { padZero, getDay, getMonthDay, createDate, prayerTimeKeys, type PrayerTimes, getImsak } from './utils';
+
+  import prayerTimesData from './assets/prayer-times.json';
+  import alertSoundFile from './assets/alert.mp3'
 
   let targetDate: Date | null = null;
   let inputVal: string | null = null;
@@ -12,12 +14,17 @@
   let tomorrowPrayerTimes: PrayerTimes | null = null;
   let showInput: boolean = false;
   let timeIsUp: boolean = false;
+  let hasBeenCountingDown: boolean = false;
   let errorMsg: string = '';
   let interval: number | null = null;
+
+  const alertSound = new Audio(alertSoundFile);
+  alertSound.preload = 'auto';
 
   function resetState() {
     countdown = '';
     timeIsUp = false;
+    hasBeenCountingDown = false;
     errorMsg = '';
     if (interval) clearInterval(interval);
   }
@@ -110,6 +117,10 @@
       if (distance < 0) {
         countdown = '';
         timeIsUp = true;
+        if (hasBeenCountingDown) {
+          alertSound.play();
+          hasBeenCountingDown = false;
+        }
         return;
       }
 
@@ -127,6 +138,7 @@
       } else {
         countdown = `${seconds}`;
       }
+      hasBeenCountingDown = true;
     }
   }
 
