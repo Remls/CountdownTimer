@@ -1,15 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import prayerTimesData from './assets/prayer-times.json';
-
-  interface PrayerTimes {
-    Fajr: string;
-    Sunrise: string;
-    Dhuhr: string;
-    Asr: string;
-    Maghrib: string;
-    Isha: string;
-  }
+  import { padZero, getDay, getMonthDay, createDate, prayerTimeKeys, type PrayerTimes, getImsak } from './utils';
 
   let targetDate: Date | null = null;
   let inputVal: string | null = null;
@@ -22,10 +14,6 @@
   let timeIsUp: boolean = false;
   let errorMsg: string = '';
   let interval: number | null = null;
-
-  function padZero(num: string | number) {
-    return String(num).padStart(2, '0');
-  }
 
   function resetState() {
     countdown = '';
@@ -40,41 +28,24 @@
     tomorrowPrayerTimes = null;
 
     const prayerTimes: Record<string, PrayerTimes> = prayerTimesData;
-    if (!prayerTimes) {
-      errorMsg = 'No prayer times found';
-      return;
-    }
+    Object.keys(prayerTimes).forEach(day => {
+      prayerTimes[day].Imsak = getImsak(prayerTimes[day].Fajr);
+    });
 
-    // Get MM-DD from Date
-    function getMonthDay(date?: Date) {
-      if (!date) date = new Date();
-      return [
-        padZero(date.getMonth() + 1),
-        '-',
-        padZero(date.getDate())
-      ].join('');
-    }
-    function createDate(monthDay: string, time: string, isTomorrow = false) {
-      let year = new Date().getFullYear();
-      if (monthDay === '01-01' && isTomorrow) year++;
-      return new Date(`${year}-${monthDay}T${time}`);
-    }
-    const todayStr = getMonthDay();
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = getMonthDay(tomorrow);
+    const todayStr = getMonthDay('today');
+    const tomorrowStr = getMonthDay('tomorrow');
   
     todayPrayerTimes = prayerTimes[todayStr];
     tomorrowPrayerTimes = prayerTimes[tomorrowStr];
   
-    // Check each time to see if it's in the future
     if (!todayPrayerTimes) {
-      errorMsg = 'Prayer times not set up for today.';
+      errorMsg = 'Cannot set countdown automatically: prayer times not set up for today. Please set a custom time instead.';
       return;
     }
-    const prayerTimeKeys: Array<keyof PrayerTimes> = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+
     let futureTimeFound = false;
     for (const time of prayerTimeKeys) {
+      if (time === 'Imsak' || time === 'Sunrise') continue;
       const d = createDate(todayStr, todayPrayerTimes[time]!);
       if (d.getTime() > new Date().getTime()) {
         futureTimeFound = true;
@@ -85,11 +56,11 @@
     }
     if (!futureTimeFound) {
       if (!tomorrowPrayerTimes) {
-        errorMsg = 'Prayer times not set up for tomorrow.';
+        errorMsg = 'Cannot set countdown automatically: prayer times not set up for tomorrow. Please set a custom time instead.';
         return;
       }
       countdownLabel = 'Fajr (tomorrow)';
-      targetDate = createDate(tomorrowStr, tomorrowPrayerTimes['Fajr']!, true);
+      targetDate = createDate(tomorrowStr, tomorrowPrayerTimes.Fajr, true);
     }
     nextPrayerTimeLoaded = true;
   }
@@ -107,7 +78,7 @@
     window.history.replaceState({}, '', `?t=${targetDateQueryParamFormatted}&label=${countdownLabel}`);
   }
 
-  // targetDate formatted
+  // targetDate formatted for display
   $: targetDateFormatted = targetDate ? [
     targetDate.getFullYear(),
     '-',
@@ -159,6 +130,20 @@
     }
   }
 
+  function setTargetDateToPrayerTime(day: 'today' | 'tomorrow', time: keyof PrayerTimes) {
+    const prayerTimes = day === 'today' ? todayPrayerTimes : tomorrowPrayerTimes;
+    if (!prayerTimes) return;
+    countdownLabel = `${time}${day === 'tomorrow' ? ' (tomorrow)' : ''}`;
+    targetDate = createDate(getMonthDay(day), prayerTimes[time]!);
+  }
+
+  function prayerTimeIsInPast(day: 'today' | 'tomorrow', time: keyof PrayerTimes) {
+    const prayerTimes = day === 'today' ? todayPrayerTimes : tomorrowPrayerTimes;
+    if (!prayerTimes) return false;
+    const d = createDate(getMonthDay(day), prayerTimes[time]!);
+    return d.getTime() < new Date().getTime();
+  }
+
   onMount(() => {
     const params = new URLSearchParams(window.location.search);
     const timestamp = params.get('t');
@@ -184,8 +169,7 @@
       }
       // Invalid format
       else {
-        console.error('Invalid timestamp format passed', timestamp);
-        errorMsg = 'Invalid format, please use HH:MM or YYYY-MM-DDTHH:MM';
+        errorMsg = 'Invalid format for timestamp in query parameter. Please use HH:MM or YYYY-MM-DDTHH:MM.';
       }
     }
   });
@@ -196,45 +180,58 @@
     <table class="prayerTimes">
       <thead>
         <tr>
+          <th colspan="3">
+            Prayer times for Male, Maldives (GMT+5)
+          </th>
+        </tr>
+        <tr>
           <th>Day</th>
-          <th>Fajr</th>
-          <th>Sunrise</th>
-          <th>Dhuhr</th>
-          <th>Asr</th>
-          <th>Maghrib</th>
-          <th>Isha</th>
+          <th>Today<br>({getDay('today')})</th>
+          <th>Tomorrow<br>({getDay('tomorrow')})</th>
         </tr>
       </thead>
+
       <tbody>
-        {#if todayPrayerTimes}
-          <tr>
-            <td>Today</td>
-            <td>{todayPrayerTimes.Fajr}</td>
-            <td>{todayPrayerTimes.Sunrise}</td>
-            <td>{todayPrayerTimes.Dhuhr}</td>
-            <td>{todayPrayerTimes.Asr}</td>
-            <td>{todayPrayerTimes.Maghrib}</td>
-            <td>{todayPrayerTimes.Isha}</td>
+        {#each prayerTimeKeys as time}
+          <tr class={time}>
+            <td>{time}</td>
+            {#if todayPrayerTimes}
+              <td 
+                on:click={() => setTargetDateToPrayerTime('today', time)}
+                style="cursor: pointer;"
+                class:past={prayerTimeIsInPast('today', time)}
+              >{todayPrayerTimes[time]}</td>
+            {:else}
+              <td>-</td>
+            {/if}
+            {#if tomorrowPrayerTimes}
+              <td
+                on:click={() => setTargetDateToPrayerTime('tomorrow', time)}
+                style="cursor: pointer;"
+                class:past={prayerTimeIsInPast('tomorrow', time)}
+              >{tomorrowPrayerTimes[time]}</td>
+            {:else}
+              <td>-</td>
+            {/if}
           </tr>
-        {/if}
-        {#if tomorrowPrayerTimes}
-          <tr>
-            <td>Tomorrow</td>
-            <td>{tomorrowPrayerTimes.Fajr}</td>
-            <td>{tomorrowPrayerTimes.Sunrise}</td>
-            <td>{tomorrowPrayerTimes.Dhuhr}</td>
-            <td>{tomorrowPrayerTimes.Asr}</td>
-            <td>{tomorrowPrayerTimes.Maghrib}</td>
-            <td>{tomorrowPrayerTimes.Isha}</td>
-          </tr>
-        {/if}
+        {/each}
       </tbody>
+
+      <tfoot>
+        <tr>
+          <td colspan="3">
+            Click on a prayer time to set countdown to that time.
+          </td>
+        </tr>
+      </tfoot>
     </table>
   {/if}
 
   <div class="buttonGroup">
     {#if !nextPrayerTimeLoaded}
-      <button on:click={loadNextPrayerTime}>Load from prayer times</button>
+      <button on:click={loadNextPrayerTime}>
+        Load next prayer time
+      </button>
     {/if}
     {#if !showInput}
       <button on:click={() => showInput = true}>Use custom time</button>
@@ -272,20 +269,41 @@
   table.prayerTimes {
     margin-bottom: 1rem;
     border-collapse: collapse;
-    border: 1px solid white;
     width: 100%;
+    font-size: 0.7rem;
   }
 
   table.prayerTimes th,
   table.prayerTimes td {
-    padding: 0.5rem;
+    padding: 0.15rem 0.25rem;
     text-align: center;
     border: 1px solid white;
+  }
+  table.prayerTimes td.past {
+    text-decoration: line-through;
+    background-color: rgba(255, 0, 0, 0.15);
+  }
+
+  table.prayerTimes tr.Imsak {
+    background-color: rgba(128, 128, 128, 0.15);
+  }
+  table.prayerTimes tr.Sunrise {
+    background-color: rgba(128, 128, 128, 0.15);
+  }
+
+  table.prayerTimes tfoot {
+    font-size: 0.6rem;
+    font-style: italic;
+    color: grey;
+  }
+  table.prayerTimes tfoot tr td {
+    border: none;
   }
 
   div.buttonGroup {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     justify-content: center;
     align-items: center;
     gap: 1rem;
